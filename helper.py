@@ -108,3 +108,77 @@ class Helper:
         if (len(buildList) > 0):
             retList.append(buildList.copy())
         return retList
+
+    def get_line_intersection(self, line1, line2):
+        """
+        Find intersection point of two lines using their endpoints.
+        Returns None if lines are parallel or don't intersect.
+        """
+        x1, y1 = -line1
+        x2, y2 = +line1
+        x3, y3 = -line2
+        x4, y4 = +line2
+
+        # Calculate denominator
+        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+
+        if abs(denom) < 1e-8:  # Lines are parallel
+            return None
+
+        # Calculate intersection point
+        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+
+        # Check if intersection occurs within line segments
+        if not (0 <= t <= 1):
+            return None
+
+        # Calculate intersection point
+        x = x1 + t * (x2 - x1)
+        y = y1 + t * (y2 - y1)
+
+        return (int(x), int(y))
+
+    def find_field_intersections(self, linesGrouped, mask, min_distance=20):
+        """
+        Find all valid intersection points between line groups within the field mask.
+        """
+        intersections = []
+
+        # Compare each group with every other group
+        for i in range(len(linesGrouped)):
+            for j in range(i + 1, len(linesGrouped)):
+                # Compare each line in first group with each line in second group
+                for line1 in linesGrouped[i]:
+                    for line2 in linesGrouped[j]:
+                        intersection = self.get_line_intersection(line1, line2)
+
+                        if intersection is None:
+                            continue
+
+                        x, y = intersection
+
+                        # Check if point is within image bounds and field mask
+                        if (0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and
+                                mask[y, x] > 0):
+
+                            # Check if this point is far enough from existing points
+                            is_unique = True
+                            for existing_x, existing_y in intersections:
+                                dist = np.sqrt((x - existing_x) ** 2 + (y - existing_y) ** 2)
+                                if dist < min_distance:
+                                    is_unique = False
+                                    break
+
+                            if is_unique:
+                                intersections.append((x, y))
+
+        return intersections
+
+    def draw_intersections(self, img, intersections, radius=5, color=(0, 255, 0), thickness=-1):
+        """
+        Draw the intersection points on the image
+        """
+        result = img.copy()
+        for x, y in intersections:
+            cv2.circle(result, (x, y), radius, color, thickness)
+        return result

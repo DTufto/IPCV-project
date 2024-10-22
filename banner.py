@@ -1,20 +1,14 @@
 import cv2
 import numpy as np
 
-def project_angled_banner_with_camera(image, banner, K, field_corners_3d, banner_rect, angle_degrees=60):
+def project_angled_banner_with_camera(image, banner, K, banner_rect, angle_degrees=60):
     h, w = image.shape[:2]
 
-    # Define rotation vector (assuming camera is looking straight at the field)
+    # Rotation and translation vector
     rvec = np.array([0.0, 0.0, 0.0])
-
-    # Define translation vector (adjust these values based on your setup)
     tvec = np.array([0.0, 0.0, 10.0])  # Assuming camera is 10 units away from the field center
 
-    # Project 3D field corners to 2D image points
-    field_corners_2d, _ = cv2.projectPoints(field_corners_3d, rvec, tvec, K, None)
-    field_corners_2d = field_corners_2d.reshape(-1, 2)
-
-    # Define banner points in 3D space
+    # Banner in 3d
     x, y, width, height = banner_rect
     banner_pts_3d = np.array([
         [x, y, 0],
@@ -39,7 +33,7 @@ def project_angled_banner_with_camera(image, banner, K, field_corners_3d, banner
     result = cv2.warpPerspective(banner, M_banner, (w, h))
     mask = cv2.warpPerspective(np.ones_like(banner), M_banner, (w, h))
 
-    # Create shadow (simplified)
+    # Attempt at shadow
     shadow_offset = np.array([0.1, 0.1, 0])  # Offset in 3D space
     shadow_pts_3d = banner_pts_3d_rotated + shadow_offset
     shadow_pts_2d, _ = cv2.projectPoints(shadow_pts_3d, rvec, tvec, K, None)
@@ -53,31 +47,29 @@ def project_angled_banner_with_camera(image, banner, K, field_corners_3d, banner
 
     return blended.astype(np.uint8)
 
-# Example usage
 image = cv2.imread('media/corner-still.jpeg')
-banner = cv2.imread('media/Pauline.jpg')
+banner = cv2.imread('media/windows7_whopper.jpg')
 
-# Define intrinsic camera matrix (example values, adjust as needed)
+# Random intrinsinc parameters
 K = np.array([
     [1000, 0, image.shape[1]/2],
     [0, 1000, image.shape[0]/2],
     [0, 0, 1]
 ])
 
-# Define the corners of the field in 3D space (assuming field is 100x50 meters)
+# Where is the field?
 field_corners_3d = np.array([
-    [-50, -25, 0],  # Top-left corner of the field
-    [50, -25, 0],   # Top-right corner of the field
-    [50, 25, 0],    # Bottom-right corner of the field
-    [-50, 25, 0]    # Bottom-left corner of the field
+    [-50, -25, 0],
+    [50, -25, 0],
+    [50, 25, 0],
+    [-50, 25, 0]
 ], dtype=np.float32)
 
-# Define the banner position and size in the 3D field space
-# Centered banner: x = 0 (center of field), y slightly above center
-banner_width = 30  # meters
-banner_height = 5  # meters
-banner_rect = (-banner_width/2, -5, banner_width, banner_height)  # x, y, width, height in meters
+# Hardcoded banner positions for now
+banner_width = 30
+banner_height = 5
+banner_rect = (-banner_width/2, -5, banner_width, banner_height)
 
-result = project_angled_banner_with_camera(image, banner, K, field_corners_3d, banner_rect, angle_degrees=60)
+result = project_angled_banner_with_camera(image, banner, K, banner_rect, angle_degrees=60)
 
 cv2.imwrite('result.jpg', result)
