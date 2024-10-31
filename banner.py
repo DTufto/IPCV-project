@@ -2,103 +2,83 @@ import cv2
 import numpy as np
 from helper import Helper, Line
 
-
-def project_banner_from_intersections(image, banner, intersections, angle_degrees=150):
-    """
-    Project a banner onto an image using intersection points and a specified angle.
-
-    Args:
-        image: Source image to project onto
-        banner: Banner image to project
-        intersections: List of intersection points
-        angle_degrees: Angle of the banner in degrees (0 is vertical, 90 is perpendicular to the line)
-    """
-    if len(intersections) < 2:
-        raise ValueError("Need at least 2 intersection points to place banner")
-
-    # Sort intersections by x-coordinate
-    sorted_intersections = sorted(intersections, key=lambda p: p[0])
-    left_point = sorted_intersections[0]
-    right_point = sorted_intersections[1]
-
-    h, w = image.shape[:2]
-
-    # Calculate banner width based on intersection points
-    banner_width = np.sqrt((right_point[0] - left_point[0]) ** 2 +
-                           (right_point[1] - left_point[1]) ** 2)
-
-    # Set banner height proportional to width while maintaining aspect ratio
-    banner_height = banner_width * 0.3
-
-    dx = right_point[0] - left_point[0]
-    dy = right_point[1] - left_point[1]
-    direction_length = np.sqrt(dx * dx + dy * dy)
-
-    dx = dx / direction_length
-    dy = dy / direction_length
-
-    perp_dx = -dy
-    perp_dy = dx
-
-    angle_radians = np.deg2rad(angle_degrees)
-    proj_dx = perp_dx * np.cos(angle_radians) - dx * np.sin(angle_radians)
-    proj_dy = perp_dy * np.cos(angle_radians) - dy * np.sin(angle_radians)
-
-    # Create destination points for the banner
-    banner_pts_2d = np.array([
-        [left_point[0], left_point[1]],  # Bottom left
-        [right_point[0], right_point[1]],  # Bottom right
-        # Top right: using projection vector
-        [right_point[0] + proj_dx * banner_height,
-         right_point[1] + proj_dy * banner_height],
-        # Top left: using projection vector
-        [left_point[0] + proj_dx * banner_height,
-         left_point[1] + proj_dy * banner_height]
-    ], dtype=np.float32)
-
-    # Source points from banner image
+def project_banner_with_homography(image, banner, H, desired_width=200):
+    h_img, w_img = image.shape[:2]
     h_banner, w_banner = banner.shape[:2]
-    src_pts = np.array([
-        [0, h_banner - 1],  # Bottom left
-        [w_banner - 1, h_banner - 1],  # Bottom right
-        [w_banner - 1, 0],  # Top right
-        [0, 0]  # Top left
-    ], dtype=np.float32)
 
-    # Calculate perspective transform and warp banner
-    M = cv2.getPerspectiveTransform(src_pts, banner_pts_2d)
-    result = cv2.warpPerspective(banner, M, (w, h))
-    mask = cv2.warpPerspective(np.ones_like(banner), M, (w, h))
+    # Calculate center of the image
+    center_x = w_img // 2
+    center_y = h_img // 2
+
+    # Create translation matrix to center the banner
+    T = np.array([
+        [1, 0, center_x - 500],
+        [0, 1, center_y - 100],
+        [0, 0, 1]
+    ])
+
+    # Calculate scaling factor to achieve desired width
+    p1 = np.array([0, 0, 1])
+    p2 = np.array([w_banner, 0, 1])
+
+    # Transform points using homography
+    p1_transformed = H @ p1
+    p2_transformed = H @ p2
+
+    # Convert to euclidean coordinates
+    p1_transformed = p1_transformed / p1_transformed[2]
+    p2_transformed = p2_transformed / p2_transformed[2]
+
+    # Calculate current width in target space
+    current_width = np.sqrt(
+        (p2_transformed[0] - p1_transformed[0]) ** 2 +
+        (p2_transformed[1] - p1_transformed[1]) ** 2
+    )
+
+    # Calculate scaling factor
+    scale = desired_width / current_width
+
+    # Create scaling matrix
+    S = np.array([
+        [scale, 0, 0],
+        [0, scale, 0],
+        [0, 0, 1]
+    ])
+
+    # Combine translation with original homography and scaling
+    H_final = T @ H @ S
+
+    # Warp the banner
+    result = cv2.warpPerspective(banner, H_final, (w_img, h_img))
+
+    # Create mask for blending
+    mask = np.ones_like(banner)
+    warped_mask = cv2.warpPerspective(mask, H_final, (w_img, h_img))
 
     # Blend with original image
-    blended = image * (1 - mask) + result * mask
+    blended = image * (1 - warped_mask) + result * warped_mask
 
     return blended.astype(np.uint8)
 
-
-# Main script
 def main():
-    img = cv2.imread('media/corner-still.jpeg', cv2.IMREAD_COLOR)
+    # Original Homography matrix
+    H = np.array([
+        [-3.04980535e+00, 3.65754478e+00, 1.04668031e+03],
+        [3.54614115e-01, 2.71924286e-01, 2.29713728e+02],
+        [-6.91927166e-04, -3.29538297e-04, 1.00000000e+00]
+    ])
+
+    # Read images
+    img = cv2.imread('media/frame.png', cv2.IMREAD_COLOR)
     banner = cv2.imread('media/windows7_whopper.jpg')
-    Help = Helper()
-    satAdjusted = Help.satAdjHSV(img, 5)
-    mask = Help.fieldMask(satAdjusted)
-    masked = cv2.bitwise_and(img, img, mask=mask)
 
-    lines = list(map(Line, Help.houghLines(masked)))
-    linesGrouped = Help.lineGrouper(lines)
-    intersections = Help.find_field_intersections(linesGrouped, mask)
+    # Project banner using homography
+    result = project_banner_with_homography(img, banner, H, desired_width=200)
 
-    for x, y in intersections:
-        cv2.circle(img, (int(x), int(y)), 5, (0, 255, 0), -1)
-
-    # Project banner using intersections
-    result = project_banner_from_intersections(img, banner, intersections)
     # Display and save result
     cv2.imshow("Result", result)
     cv2.waitKey(5000)
-    cv2.imwrite('result_with_banner.jpg', result)
-
+    cv2.imwrite('result_with_centered_banner.jpg', result)
 
 if __name__ == "__main__":
     main()

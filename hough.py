@@ -6,7 +6,7 @@ from helper import Line
 Help = Helper()
 
 # Read image 
-img = cv2.imread('media/corner-still.jpeg', cv2.IMREAD_COLOR) # road.png is the filename
+img = cv2.imread('media/frame.png', cv2.IMREAD_COLOR) # road.png is the filename
 
 satAdjusted = Help.satAdjHSV(img, 5)
 # plt.hist(satAdjusted.ravel(),256,[0,256]); plt.show()
