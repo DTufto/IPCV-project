@@ -2,10 +2,9 @@ import cv2
 from helper import Helper, Line
 from pathlib import Path
 
-
 def process_football_frame(frame, helper):
     # Create field mask
-    field_mask = helper.create_field_mask(frame)
+    field_mask = helper.create_field_mask(frame)  # Using new adaptive mask
 
     # Detect lines using improved white line detection
     lines = helper.detect_lines_on_field(frame, field_mask)
@@ -34,7 +33,6 @@ def process_football_frame(frame, helper):
     result_frame = helper.draw_intersections(frame_with_lines, intersections)
 
     return result_frame
-
 
 def process_football_videos(clips_folder: str, output_file: str) -> None:
     # Initialize helper
@@ -85,6 +83,8 @@ def process_football_videos(clips_folder: str, output_file: str) -> None:
             # Add clip name and progress
             clip_frame_count += 1
             progress = (clip_frame_count / total_frames) * 100
+            # if round(progress) % 5 == 0:
+            #     print(progress)
             cv2.putText(result_frame, f"Clip: {video_file.name} ({progress:.1f}%)",
                         (10, frame_height - 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
@@ -98,16 +98,4 @@ def process_football_videos(clips_folder: str, output_file: str) -> None:
     out.release()
     print("Video processing completed.")
 
-
-def main():
-    clips_folder = './media/football_clips'
-    output_file = 'football_lines_detected.mp4'
-
-    try:
-        process_football_videos(clips_folder, output_file)
-    except Exception as e:
-        print(f"Error processing videos: {e}")
-
-
-if __name__ == '__main__':
-    main()
+process_football_videos('./media/football_clips', 'outputtie.mp4')
