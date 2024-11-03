@@ -79,23 +79,46 @@ class Helper:
 
         return player_mask
 
-    def create_grass_mask(self, hsv):
-        """Create a robust grass mask that accounts for color variations"""
+    def create_grass_mask(self, hsv, debug_folder=None):
+        """
+        Create a robust grass mask that accounts for color variations and handles LED boards
+        """
+        # Multiple grass color ranges
         grass_masks = []
 
-        # Main grass color
-        grass_masks.append(cv2.inRange(hsv, np.array([35, 40, 30]), np.array([85, 255, 200])))
+        # Main grass color - tightened range to avoid LED interference
+        grass_masks.append(cv2.inRange(hsv, np.array([35, 50, 30]), np.array([85, 255, 200])))
 
-        # Lighter grass / chalk lines
-        grass_masks.append(cv2.inRange(hsv, np.array([35, 20, 150]), np.array([85, 100, 255])))
+        # Lighter grass / chalk lines - adjusted saturation
+        grass_masks.append(cv2.inRange(hsv, np.array([35, 30, 150]), np.array([85, 90, 255])))
 
         # Darker grass shadows
-        grass_masks.append(cv2.inRange(hsv, np.array([35, 40, 20]), np.array([85, 255, 150])))
+        grass_masks.append(cv2.inRange(hsv, np.array([35, 50, 20]), np.array([85, 255, 150])))
 
         # Combine all grass masks
         combined_mask = grass_masks[0]
         for mask in grass_masks[1:]:
             combined_mask = cv2.bitwise_or(combined_mask, mask)
+
+        # Additional LED board filtering
+        def filter_led_boards(mask, hsv):
+            # Detect super bright and saturated areas (typical of LED boards)
+            led_mask = cv2.inRange(hsv, np.array([0, 200, 200]), np.array([180, 255, 255]))
+
+            # Remove thin horizontal strips that are likely LED boards
+            kernel_horizontal = np.ones((1, 15), np.uint8)
+            led_lines = cv2.morphologyEx(led_mask, cv2.MORPH_CLOSE, kernel_horizontal)
+
+            # Remove detected LED regions from the grass mask
+            return cv2.bitwise_and(mask, cv2.bitwise_not(led_lines))
+
+        # Apply LED filtering
+        combined_mask = filter_led_boards(combined_mask, hsv)
+
+        # Additional post-processing to clean up the mask
+        kernel = np.ones((5, 5), np.uint8)
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
 
         return combined_mask
 
@@ -252,10 +275,11 @@ class Helper:
         perp_dist = abs(diff_x * perp_vec[0] + diff_y * perp_vec[1])
 
         return perp_dist < max_distance
+
     def get_line_intersection(self, line1, line2):
         """
         Find intersection point of two lines using their endpoints.
-        Returns None if lines are parallel or don't intersect.
+        Returns None if lines are parallel, don't intersect, or are too far apart.
         """
         x1, y1 = -line1
         x2, y2 = +line1
@@ -268,16 +292,30 @@ class Helper:
         if abs(denom) < 1e-8:  # Lines are parallel
             return None
 
-        # Calculate intersection point
+        # Calculate intersection parameters
         t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-
-        # Check if intersection occurs within line segments
-        if not (0 <= t <= 1):
-            return None
+        u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
 
         # Calculate intersection point
         x = x1 + t * (x2 - x1)
         y = y1 + t * (y2 - y1)
+
+        # Check if intersection occurs within or very close to both line segments
+        margin = 20  # Allow for some margin beyond line endpoints
+
+        # Check if intersection is within the bounding box of each line (with margin)
+        in_bounds_1 = (
+                min(x1, x2) - margin <= x <= max(x1, x2) + margin and
+                min(y1, y2) - margin <= y <= max(y1, y2) + margin
+        )
+
+        in_bounds_2 = (
+                min(x3, x4) - margin <= x <= max(x3, x4) + margin and
+                min(y3, y4) - margin <= y <= max(y3, y4) + margin
+        )
+
+        if not (in_bounds_1 and in_bounds_2):
+            return None
 
         return (int(x), int(y))
 
@@ -330,6 +368,8 @@ class Helper:
         for x, y in intersections:
             cv2.circle(result, (x, y), radius, color, thickness)
         return result
+
+
 
     def detect_lines_on_field(self, frame, field_mask):
         """Detect lines on the field using Canny edge detection within masked region"""
