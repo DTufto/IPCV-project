@@ -4,7 +4,7 @@ from pathlib import Path
 
 def process_football_frame(frame, helper):
     # Create field mask
-    field_mask = helper.create_field_mask(frame)  # Using new adaptive mask
+    field_mask = helper.create_field_mask(frame)
 
     # Detect lines using improved white line detection
     lines = helper.detect_lines_on_field(frame, field_mask)
@@ -68,7 +68,6 @@ def process_football_videos(clips_folder: str, output_file: str) -> None:
             print(f"Warning: Could not open {video_file.name}, skipping...")
             continue
 
-        # Add text showing current clip name
         clip_frame_count = 0
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
@@ -83,8 +82,6 @@ def process_football_videos(clips_folder: str, output_file: str) -> None:
             # Add clip name and progress
             clip_frame_count += 1
             progress = (clip_frame_count / total_frames) * 100
-            # if round(progress) % 5 == 0:
-            #     print(progress)
             cv2.putText(result_frame, f"Clip: {video_file.name} ({progress:.1f}%)",
                         (10, frame_height - 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)

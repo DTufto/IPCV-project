@@ -1,10 +1,8 @@
 import cv2
 import numpy as np
-from matplotlib import pyplot as plt
 import math
 
 kernel = np.ones((3, 3), np.uint8)
-
 
 class Vector:
     def __init__(self, x, y):
@@ -16,10 +14,6 @@ class Vector:
             return 90.0
         return math.degrees(math.atan(self.y / self.x))
 
-    def __str__(self):
-        return f"Vector with x: {self.x} and y: {self.y}"
-
-
 class Point:
     def __init__(self, x, y):
         self.x = x
@@ -30,10 +24,6 @@ class Point:
 
     def __sub__(self, o):
         return Vector(self.x - o.x, self.y - o.y)
-
-    def __str__(self):
-        return f"Point with x: {self.x} and y: {self.y}"
-
 
 class Line:
     def __init__(self, line):
@@ -52,70 +42,12 @@ class Line:
     def __pos__(self):
         return self.points[1].x, self.points[1].y
 
-    def __str__(self):
-        return f"Line from: \n{self.points[0]} \nTo: \n{self.points[1]} \nWith angle: {self.angle}"
-
-
 class Helper:
     def __init__(self):
         self.last_valid_mask = None
-        self.green_ranges = []
-        return
-
-    def dilate(self, img, iters=1):
-        return cv2.dilate(img, kernel, iterations=iters)
-
-    def erode(self, img, iters=1):
-        return cv2.erode(img, kernel, iterations=iters)
-
-    def analyze_image_stats(self, img):
-        """Analyze color statistics of the image."""
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        h, s, v = cv2.split(hsv)
-
-        # Calculate histogram for hue channel
-        hist_h = cv2.calcHist([h], [0], None, [180], [0, 180])
-
-        # Find dominant hue peaks
-        peaks = np.argpartition(hist_h.flatten(), -3)[-3:]  # Top 3 hue values
-
-        # Calculate statistics
-        avg_brightness = np.mean(v)
-        avg_saturation = np.mean(s)
-        std_h = np.std(h)
-        std_s = np.std(s)
-
-        return {
-            'dominant_hues': peaks,
-            'avg_brightness': avg_brightness,
-            'avg_saturation': avg_saturation,
-            'hue_std': std_h,
-            'sat_std': std_s
-        }
-
-    def remove_small_regions(self, mask, min_size=1000):
-        """Remove small disconnected regions from the mask."""
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-
-        # Find the largest component (excluding background)
-        sizes = stats[1:, cv2.CC_STAT_AREA]  # Exclude background
-        if len(sizes) == 0:
-            return mask
-
-        max_size = np.max(sizes)
-
-        # Create new mask with only large regions
-        clean_mask = np.zeros_like(mask)
-        for i in range(1, num_labels):  # Skip background (label 0)
-            if stats[i, cv2.CC_STAT_AREA] >= min_size or stats[i, cv2.CC_STAT_AREA] >= max_size * 0.1:
-                clean_mask[labels == i] = 255
-
-        return clean_mask
 
     def detect_players(self, img, hsv):
-        """
-        Detect players using multiple techniques including jersey colors and local variance
-        """
+        """Detect players using multiple techniques including jersey colors and local variance"""
         h, s, v = cv2.split(hsv)
 
         # Jersey color detection
@@ -145,12 +77,7 @@ class Helper:
         return player_mask
 
     def create_grass_mask(self, hsv):
-        """
-        Create a robust grass mask that accounts for color variations
-        """
-        h, s, v = cv2.split(hsv)
-
-        # Multiple grass color ranges
+        """Create a robust grass mask that accounts for color variations"""
         grass_masks = []
 
         # Main grass color
@@ -170,18 +97,14 @@ class Helper:
         return combined_mask
 
     def create_field_mask(self, img):
-        """
-        Create an improved field mask with better handling of players and field variations
-        """
+        """Create an improved field mask with better handling of players and field variations"""
         # Convert to HSV
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        h, s, v = cv2.split(hsv)
 
         # Create initial field mask
         field_mask = self.create_grass_mask(hsv)
 
         # Initial morphological operations
-        kernel_small = np.ones((3, 3), np.uint8)
         kernel_medium = np.ones((7, 7), np.uint8)
         kernel_large = np.ones((21, 21), np.uint8)
 
@@ -216,37 +139,6 @@ class Helper:
             field_mask = self.last_valid_mask.copy()
 
         return field_mask
-
-    def houghLines(self, img):
-        img = cv2.GaussianBlur(img, (5, 5), 0)
-        ret, img = cv2.threshold(img, 170, 255, cv2.THRESH_BINARY)
-        img = cv2.cvtColor(img, cv2.CV_8U)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        # Find the edges in the image using canny detector
-        edges = cv2.Canny(gray, 120, 240)
-        # Detect points that form a line
-        lines = cv2.HoughLinesP(gray, 3, np.pi / 720, 1000, minLineLength=200, maxLineGap=40)
-        return lines
-
-    def satAdjHSV(self, imgBGR, sAdj):
-        imgHSV = cv2.cvtColor(imgBGR, cv2.COLOR_BGR2HSV)
-        (h, s, v) = cv2.split(imgHSV.astype('int'))
-        s = s * sAdj
-        s = np.clip(s, 0, 255)
-        return cv2.merge([h, s, v]).astype('uint8')
-
-    def thresholdBand(self, img, lower, upper):
-        _, mask0 = cv2.threshold(img, lower, 255, cv2.THRESH_BINARY)
-        _, mask1 = cv2.threshold(img, upper, 255, cv2.THRESH_BINARY_INV)
-        return cv2.bitwise_and(mask0, mask0, mask=mask1)
-
-    def fieldMask(self, imgHSV):
-        """Legacy field mask method - kept for compatibility"""
-        (h, s, v) = cv2.split(imgHSV)
-        mask = self.thresholdBand(h, 40, 70)
-        mask = self.erode(mask, 14)
-        mask = self.dilate(mask, 50)
-        return mask
 
     def lineGrouper(self, lines):
         """Improved line grouping that better handles parallel lines."""
@@ -371,7 +263,6 @@ class Helper:
         # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Find bounding box of the field mask
         if field_mask is None:
             return None
 
@@ -394,7 +285,7 @@ class Helper:
         mean_val = cv2.mean(roi_masked, roi_mask)[0]
 
         # Dynamic thresholding based on mean brightness
-        threshold_offset = 30  # This can be adjusted
+        threshold_offset = 30
         _, roi_thresh = cv2.threshold(
             roi_masked,
             mean_val + threshold_offset,
@@ -402,10 +293,10 @@ class Helper:
             cv2.THRESH_BINARY
         )
 
-        # Optional: Quick noise reduction using a small gaussian blur
+        # Noise reduction using small gaussian blur
         roi_thresh = cv2.GaussianBlur(roi_thresh, (3, 3), 0)
 
-        # Edge enhancement using Sobel operators (faster than Canny)
+        # Edge enhancement using Sobel operators
         sobelx = cv2.Sobel(roi_thresh, cv2.CV_64F, 1, 0, ksize=3)
         sobely = cv2.Sobel(roi_thresh, cv2.CV_64F, 0, 1, ksize=3)
         gradient = np.sqrt(sobelx ** 2 + sobely ** 2)
@@ -413,10 +304,10 @@ class Helper:
         # Normalize gradient to 0-255 range
         gradient = np.uint8(gradient * 255 / gradient.max())
 
-        # Simple threshold on gradient image
+        # Threshold gradient image
         _, edges = cv2.threshold(gradient, 40, 255, cv2.THRESH_BINARY)
 
-        # Use probabilistic Hough transform with optimized parameters
+        # Use probabilistic Hough transform
         min_line_length = 50
         max_line_gap = 30
         threshold = 50
@@ -424,13 +315,13 @@ class Helper:
         lines = cv2.HoughLinesP(
             edges,
             rho=1,
-            theta=np.pi / 180,  # Reduced angle resolution for speed
+            theta=np.pi / 180,
             threshold=threshold,
             minLineLength=min_line_length,
             maxLineGap=max_line_gap
         )
 
-        # If no lines detected, try with more sensitive parameters
+        # Try with more sensitive parameters if no lines detected
         if lines is None or len(lines) < 2:
             lines = cv2.HoughLinesP(
                 edges,
