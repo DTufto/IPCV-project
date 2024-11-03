@@ -21,10 +21,6 @@ def process_football_frame(frame, helper):
     frame_with_lines = frame.copy()
     for index, group in enumerate(linesGrouped):
         color = (255, 0, 255)
-        if index == 0:
-            color = (255, 0, 0)
-        elif index == 1:
-            color = (0, 0, 255)
 
         for line in group:
             cv2.line(frame_with_lines, -line, +line, color, 3)

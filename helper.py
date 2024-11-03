@@ -4,6 +4,7 @@ import math
 
 kernel = np.ones((3, 3), np.uint8)
 
+
 class Vector:
     def __init__(self, x, y):
         self.x = x
@@ -13,6 +14,10 @@ class Vector:
         if self.x == 0:
             return 90.0
         return math.degrees(math.atan(self.y / self.x))
+
+    def __str__(self):
+        return f"Vector with x: {self.x} and y: {self.y}"
+
 
 class Point:
     def __init__(self, x, y):
@@ -28,8 +33,6 @@ class Point:
 class Line:
     def __init__(self, line):
         x1, y1, x2, y2 = line[0]
-        if y1 > y2:
-            x2, y2, x1, y1 = line[0]
         self.points = [Point(x1, y1), Point(x2, y2)]
         self.angle = (self.points[0] - self.points[1]).angle()
 
@@ -141,7 +144,7 @@ class Helper:
         return field_mask
 
     def lineGrouper(self, lines):
-        """Improved line grouping that better handles parallel lines."""
+        """Improved line grouping using angle and perpendicular distance."""
         if not lines:
             return []
 
@@ -150,116 +153,186 @@ class Helper:
 
         # Initialize groups
         groups = []
-        current_group = [lines[0]]
+        used_lines = set()
 
-        for i in range(1, len(lines)):
-            current_line = lines[i]
-            reference_line = current_group[0]  # Use first line in group as reference
+        for i, line in enumerate(lines):
+            if i in used_lines:
+                continue
 
-            # Check if lines are parallel (within tolerance)
-            angle_diff = abs(current_line.angle - reference_line.angle)
-            if angle_diff < 10 or angle_diff > 170:
-                # Lines are parallel - check if they're close enough
-                if self.are_lines_close(current_line, reference_line):
-                    current_group.append(current_line)
-                else:
-                    # Start new group if lines are far apart
-                    if len(current_group) > 0:
-                        groups.append(current_group)
-                    current_group = [current_line]
-            else:
-                # Different angle - start new group
-                if len(current_group) > 0:
-                    groups.append(current_group)
-                current_group = [current_line]
+            current_group = [line]
+            used_lines.add(i)
 
-        # Add last group
-        if len(current_group) > 0:
-            groups.append(current_group)
+            # Compare with remaining lines
+            for j in range(i + 1, len(lines)):
+                if j in used_lines:
+                    continue
+
+                test_line = lines[j]
+                angle_diff = abs(test_line.angle - line.angle)
+
+                # Check if lines are parallel (within tolerance)
+                if angle_diff < 5 or angle_diff > 175:
+                    # Check perpendicular distance
+                    if self.are_lines_close(line, test_line):
+                        current_group.append(test_line)
+                        used_lines.add(j)
+
+            if len(current_group) > 0:
+                # Average the lines in the group
+                groups.append(self.merge_group_lines(current_group))
 
         return groups
 
-    def get_line_intersection(self, line1, line2):
-        x1, y1 = -line1
-        x2, y2 = +line1
-        x3, y3 = -line2
-        x4, y4 = +line2
+    def merge_group_lines(self, group):
+        """Merge lines in a group by taking the furthest endpoints."""
+        if len(group) == 1:
+            return group
 
-        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        # Initialize with first line's endpoints
+        points = []
+        for line in group:
+            points.append((line.points[0].x, line.points[0].y))  # Start point
+            points.append((line.points[1].x, line.points[1].y))  # End point
 
-        if abs(denom) < 1e-8:
-            return None
+        # Convert to numpy array for easier manipulation
+        points = np.array(points)
 
-        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+        # Get the primary direction of the line group (using first line as reference)
+        ref_line = group[0]
+        dx = ref_line.points[1].x - ref_line.points[0].x
+        dy = ref_line.points[1].y - ref_line.points[0].y
 
-        if not (0 <= t <= 1):
-            return None
+        # Calculate the angle of the line
+        angle = math.atan2(dy, dx)
 
-        x = x1 + t * (x2 - x1)
-        y = y1 + t * (y2 - y1)
+        # Create rotation matrix to align line with x-axis
+        rotation_matrix = np.array([
+            [math.cos(-angle), -math.sin(-angle)],
+            [math.sin(-angle), math.cos(-angle)]
+        ])
 
-        return (int(x), int(y))
+        # Rotate all points
+        rotated_points = np.dot(points, rotation_matrix.T)
 
-    def are_lines_close(self, line1, line2, max_distance=50):
-        """Check if two parallel lines are close to each other."""
-        # Get midpoints of lines
+        # Find extremes in rotated space (now aligned with x-axis)
+        min_x_idx = np.argmin(rotated_points[:, 0])
+        max_x_idx = np.argmax(rotated_points[:, 0])
+
+        # Get the original points that correspond to these extremes
+        start_point = points[min_x_idx]
+        end_point = points[max_x_idx]
+
+        # Create new merged line
+        merged_line = [np.array([[int(start_point[0]), int(start_point[1]),
+                                  int(end_point[0]), int(end_point[1])]])]
+        return [Line(merged_line[0])]
+
+    def are_lines_close(self, line1, line2, max_distance=30):
+        """Check if two parallel lines are close to each other using perpendicular distance."""
+        # Get line vectors
+        vec1 = (line1.points[1].x - line1.points[0].x, line1.points[1].y - line1.points[0].y)
+        length1 = math.sqrt(vec1[0] ** 2 + vec1[1] ** 2)
+
+        # Normalize vector
+        if length1 > 0:
+            vec1 = (vec1[0] / length1, vec1[1] / length1)
+
+        # Calculate perpendicular vector
+        perp_vec = (-vec1[1], vec1[0])
+
+        # Get midpoints
         mid1 = ((line1.points[0].x + line1.points[1].x) / 2,
                 (line1.points[0].y + line1.points[1].y) / 2)
         mid2 = ((line2.points[0].x + line2.points[1].x) / 2,
                 (line2.points[0].y + line2.points[1].y) / 2)
 
-        # Calculate distance between midpoints
-        distance = np.sqrt((mid1[0] - mid2[0]) ** 2 + (mid1[1] - mid2[1]) ** 2)
+        # Calculate perpendicular distance
+        diff_x = mid2[0] - mid1[0]
+        diff_y = mid2[1] - mid1[1]
+        perp_dist = abs(diff_x * perp_vec[0] + diff_y * perp_vec[1])
 
-        return distance < max_distance
+        return perp_dist < max_distance
+    def get_line_intersection(self, line1, line2):
+        """
+        Find intersection point of two lines using their endpoints.
+        Returns None if lines are parallel or don't intersect.
+        """
+        x1, y1 = -line1
+        x2, y2 = +line1
+        x3, y3 = -line2
+        x4, y4 = +line2
 
-    def find_field_intersections(self, linesGrouped, mask, min_distance=40):
-        """Find intersections between roughly perpendicular lines."""
+        # Calculate denominator
+        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+
+        if abs(denom) < 1e-8:  # Lines are parallel
+            return None
+
+        # Calculate intersection point
+        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+
+        # Check if intersection occurs within line segments
+        if not (0 <= t <= 1):
+            return None
+
+        # Calculate intersection point
+        x = x1 + t * (x2 - x1)
+        y = y1 + t * (y2 - y1)
+
+        return (int(x), int(y))
+
+    def find_field_intersections(self, linesGrouped, mask, min_distance=30):
+        """Find valid intersection points with improved filtering."""
         intersections = []
 
+        # Compare each group with every other group
         for i in range(len(linesGrouped)):
             for j in range(i + 1, len(linesGrouped)):
-                # Get representative lines from each group
-                line1 = linesGrouped[i][0]  # Use first line as representative
-                line2 = linesGrouped[j][0]
+                # Get angle between groups
+                angle_diff = abs(linesGrouped[i][0].angle - linesGrouped[j][0].angle)
 
-                # Check if lines are roughly perpendicular (90° ± 20°)
-                angle_diff = abs(abs(line1.angle - line2.angle) - 90)
-                if angle_diff > 20:
+                # Skip nearly parallel lines
+                if angle_diff < 20 or angle_diff > 160:
                     continue
 
-                # Find intersection
-                intersection = self.get_line_intersection(line1, line2)
+                # Compare each line pair
+                for line1 in linesGrouped[i]:
+                    for line2 in linesGrouped[j]:
+                        intersection = self.get_line_intersection(line1, line2)
 
-                if intersection is None:
-                    continue
+                        if intersection is None:
+                            continue
 
-                x, y = intersection
+                        x, y = intersection
 
-                # Check if intersection is within mask and not too close to existing points
-                if (0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and
-                        mask[y, x] > 0):
+                        # Check if point is within image bounds and field mask
+                        if (0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and
+                                mask[y, x] > 0):
 
-                    is_unique = True
-                    for existing_x, existing_y in intersections:
-                        dist = np.sqrt((x - existing_x) ** 2 + (y - existing_y) ** 2)
-                        if dist < min_distance:
-                            is_unique = False
-                            break
+                            # Check distance from existing intersections
+                            is_unique = True
+                            for existing_x, existing_y in intersections:
+                                dist = math.sqrt((x - existing_x) ** 2 + (y - existing_y) ** 2)
+                                if dist < min_distance:
+                                    is_unique = False
+                                    break
 
-                    if is_unique:
-                        intersections.append((x, y))
+                            if is_unique:
+                                intersections.append((x, y))
 
         return intersections
 
     def draw_intersections(self, img, intersections, radius=5, color=(0, 255, 0), thickness=-1):
+        """
+        Draw the intersection points on the image
+        """
         result = img.copy()
         for x, y in intersections:
             cv2.circle(result, (x, y), radius, color, thickness)
         return result
 
     def detect_lines_on_field(self, frame, field_mask):
-        """Detect lines on the field using optimized preprocessing within masked region"""
+        """Detect lines on the field using Canny edge detection within masked region"""
         # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -296,20 +369,13 @@ class Helper:
         # Noise reduction using small gaussian blur
         roi_thresh = cv2.GaussianBlur(roi_thresh, (3, 3), 0)
 
-        # Edge enhancement using Sobel operators
-        sobelx = cv2.Sobel(roi_thresh, cv2.CV_64F, 1, 0, ksize=3)
-        sobely = cv2.Sobel(roi_thresh, cv2.CV_64F, 0, 1, ksize=3)
-        gradient = np.sqrt(sobelx ** 2 + sobely ** 2)
-
-        # Normalize gradient to 0-255 range
-        gradient = np.uint8(gradient * 255 / gradient.max())
-
-        # Threshold gradient image
-        _, edges = cv2.threshold(gradient, 40, 255, cv2.THRESH_BINARY)
+        # Use Canny edge detection instead of Sobel
+        # Lower threshold set to 50, upper threshold to 150
+        edges = cv2.Canny(roi_thresh, 30, 150)
 
         # Use probabilistic Hough transform
         min_line_length = 50
-        max_line_gap = 30
+        max_line_gap = 70
         threshold = 50
 
         lines = cv2.HoughLinesP(
@@ -341,10 +407,7 @@ class Helper:
                 x1, y1 = x1 + x, y1 + y
                 x2, y2 = x2 + x, y2 + y
 
-                # Filter based on angle
-                angle = abs(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
-                if (angle < 20 or (90 - 20) <= angle <= (90 + 20) or angle > 160):
-                    filtered_lines.append(np.array([[x1, y1, x2, y2]]))
+                filtered_lines.append(np.array([[x1, y1, x2, y2]]))
 
             lines = np.array(filtered_lines) if filtered_lines else None
 
