@@ -2,8 +2,34 @@ import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 import math
+from enum import Enum
 
 kernel = np.ones((3, 3), np.uint8) 
+
+EMPTYPOINT = "EMPTYPOINT"
+LCORNER = "LCORNER"
+LGOALLINEX16M = "LGOALLINEX16M"
+LGOALLINEX5M = "LGOALLINEX5M"
+LM16 = "LM16"
+LM5 = "LM5"
+LGOALPOST = "LGOALPOST"
+RGOALPOST = "RGOALPOST"
+RM5 = "RM5"
+RM16 = "RM16"
+RGOALLINEX5M = "RGOALLINEX5M"
+RGOALLINEX16M = "RGOALLINEX16M"
+RCORNER = "RCORNER"
+
+EMPTYLINE = "EMPTY"
+GOALLINE = "GOALLINE"
+SIDELINEL = "LEFTSIDELINE"
+SIDELINER = "RIGHTSIDELINE"
+LINE16L = "LINE16L"
+LINE16R = "LINE16R"
+LINE16 = "LINE16"
+LINE5L = "LINE5L"
+LINE5R = "LINE5R"
+LINE5 = "LINE5"
 
 class Vector:
     def __init__(self, x, y, z):
@@ -43,6 +69,8 @@ class Point:
         self.x = np.int64(x)
         self.y = np.int64(y)
         self.z = np.int64(z)
+        self.interLines = []
+        self.name = EMPTYPOINT
     
     def __add__(self, o):
         return Vector(self.x + o.x, self.y + o.y, self.z + o.z)
@@ -51,16 +79,29 @@ class Point:
         return Vector(self.x - o.x, self.y - o.y, self.z - o.z)
     
     def __str__(self):
-        return f"Point with x: {self.x} and y: {self.y} and z: {self.z}"
+        return f"Point named: {self.name} with x: {self.x} and y: {self.y} and z: {self.z}"
     
     def onLine(self, line, epsilon=10000):
         vec0 = line.points[0] - line.points[1]
         vec1 = line.points[1] - self
         crossResult = (vec0 & vec1)
-        print(crossResult.mag())
+        # print(crossResult.mag())
         if crossResult <= epsilon:
             return True
         return False
+    
+    def withinLineSquare(self, line, bounds=10):
+        maxY = max(line.points[0].y, line.points[1].y)
+        minY = min(line.points[0].y, line.points[1].y)
+        if self.y >= minY - bounds and self.y <= maxY + bounds:
+            maxX = max(line.points[0].x, line.points[1].x)
+            minX = min(line.points[0].x, line.points[1].x)
+            if self.x >= minX - bounds and self.x <= maxX + bounds:
+                return True
+        return False
+    
+    def betweenLinePoints(self, line):
+        return self.onLine(line) and self.withinLineSquare(line)
     
 class Line:
     def __init__(self, line):
@@ -70,6 +111,8 @@ class Line:
         self.points = [Point(x1, y1), Point(x2, y2)]
         self.angle = (self.points[1] - self.points[0]).angle()
         self.length = (self.points[1] - self.points[0]).mag()
+        self.name = EMPTYLINE
+        self.intersections = []
 
     def __lt__(self, o):
         return self.angle < o.angle
@@ -81,7 +124,25 @@ class Line:
         return self.points[1].x, self.points[1].y
 
     def __str__(self):
-        return f"Line from: \n{self.points[0]} \nTo: \n{self.points[1]} \nWith angle: {self.angle}"
+        return f"Line named: {self.name} \nFrom: \n{self.points[0]} \nTo: \n{self.points[1]} \nWith angle: {self.angle}"
+
+    def decompose(self):
+        p0 = self.points[0]
+        p1 = self.points[1]
+        a = (p0.y-p1.y)/(p0.x-p1.x)
+        b = (p0.x*p1.y - p1.x*p0.y)/(p0.x-p1.x)
+        return (a, b)
+
+    def __mul__(self, o):
+        l0a, l0b = self.decompose()
+        l1a, l1b = o.decompose()
+        # Find intersection
+        A = np.array([[-l0a, 1], [-l1a, 1]])
+        b = np.array([[l0b], [l1b]])
+        # you have to solve linear System AX = b where X = [x y]'
+        X = np.linalg.pinv(A) @ b
+        x, y = np.round(np.squeeze(X), 4)
+        return Point(x, y)
     
     def extendsLine(self, other):
         point0 = other.points[0]
@@ -188,3 +249,124 @@ class Helper:
                 if line.angle > minAngle and line.angle < maxAngle:
                     retList.append(line)
         return retList
+
+    def createPointDict(self, lines):
+        points = []
+        for vertical in lines[0]:
+            for horizontal in lines[1]:
+                intersect = vertical * horizontal
+                if intersect.betweenLinePoints(vertical) and intersect.betweenLinePoints(horizontal):
+                    vertical.intersections.append(intersect)
+                    horizontal.intersections.append(intersect)
+                    intersect.interLines.append(vertical)
+                    intersect.interLines.append(horizontal)
+                    points.append(intersect)
+        for line in lines[0]:
+            line.intersections.sort(key = lambda x : (line.points[0] - x).mag())
+        for line in lines[1]:
+            line.intersections.sort(key = lambda x : (line.points[0] - x).mag())
+        return points
+        
+    def classifyLines(self, lines):
+        goalGroup = -1
+        horiGroup = -1
+        goalLine = None
+        for line in lines[0]:
+            if len(line.intersections) >= 3:
+                line.name = GOALLINE
+                goalGroup = 0
+                horiGroup = 1
+                goalLine = line
+        for line in lines[1]:
+            if len(line.intersections) >= 3:
+                line.name = GOALLINE
+                goalGroup = 1
+                horiGroup = 0
+                goalLine = line
+        lCorner = None
+        rCorner = None
+        for line in lines[horiGroup]:
+            if len(line.intersections) == 1:
+                if line.angle - goalLine.angle < 180:
+                    line.name = SIDELINEL
+                    line.intersections[0].name = LCORNER
+                    lCorner = line.intersections[0]
+                else:
+                    line.name = SIDELINER
+                    line.intersections[0].name = RCORNER
+                    rCorner = line.intersections[0]
+        LtoR = [LGOALLINEX16M, LGOALLINEX5M, RGOALLINEX5M, RGOALLINEX16M]
+        RtoL = [RGOALLINEX16M, RGOALLINEX5M, LGOALLINEX5M, LGOALLINEX16M]
+        line16 = [LINE16L, LINE16, LINE16R]
+        line5 = [LINE5L, LINE5, LINE5R]
+        if goalLine.intersections[0].name == LCORNER:
+            for index, inter in enumerate(goalLine.intersections[1:]):
+                inter.name = LtoR[index]
+                if inter.name == LGOALLINEX16M:
+                    for line in inter.interLines:
+                        if line.name == EMPTYLINE:
+                            line.name = LINE16L
+                            for inter in line.intersections:
+                                if inter.name == EMPTYPOINT:
+                                    inter.name = LM16
+                                    for line in inter.interLines:
+                                        if line.name == EMPTYLINE:
+                                            line.name = LINE16
+                                            for inter in line.intersections:
+                                                if inter.name == EMPTYLINE:
+                                                    inter.name = RM16
+                                                    for line in inter.interLines:
+                                                        if line.name == EMPTYLINE:
+                                                            line.name = LINE16R
+                elif inter.name == LGOALLINEX5M:
+                    for line in inter.interLines:
+                        if line.name == EMPTYLINE:
+                            line.name = LINE5L
+                            for inter in line.intersections:
+                                if inter.name == EMPTYPOINT:
+                                    inter.name = LM5
+                                    for line in inter.interLines:
+                                        if line.name == EMPTYLINE:
+                                            line.name = LINE5
+                                            for inter in line.intersections:
+                                                if inter.name == EMPTYLINE:
+                                                    inter.name = RM5
+                                                    for line in inter.interLines:
+                                                        if line.name == EMPTYLINE:
+                                                            line.name = LINE5R
+
+        elif goalLine.intersections[0].name == RCORNER:
+            for index, inter in enumerate(goalLine.intersections[1:]):
+                inter.name = RtoL[index]
+                if inter.name == RGOALLINEX16M:
+                    for line in inter.interLines:
+                        if line.name == EMPTYLINE:
+                            line.name = LINE16R
+                            for inter in line.intersections:
+                                if inter.name == EMPTYPOINT:
+                                    inter.name = RM16
+                                    for line in inter.interLines:
+                                        if line.name == EMPTYLINE:
+                                            line.name = LINE16
+                                            for inter in line.intersections:
+                                                if inter.name == EMPTYLINE:
+                                                    inter.name = LM16
+                                                    for line in inter.interLines:
+                                                        if line.name == EMPTYLINE:
+                                                            line.name = LINE16L
+                elif inter.name == RGOALLINEX5M:
+                    for line in inter.interLines:
+                        if line.name == EMPTYLINE:
+                            line.name = LINE5R
+                            for inter in line.intersections:
+                                if inter.name == EMPTYPOINT:
+                                    inter.name = RM5
+                                    for line in inter.interLines:
+                                        if line.name == EMPTYLINE:
+                                            line.name = LINE5
+                                            for inter in line.intersections:
+                                                if inter.name == EMPTYLINE:
+                                                    inter.name = LM5
+                                                    for line in inter.interLines:
+                                                        if line.name == EMPTYLINE:
+                                                            line.name = LINE5L
