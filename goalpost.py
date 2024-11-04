@@ -111,27 +111,8 @@ class GoalpostDetector:
                 reason.append(f"aspect {height / width:.1f} < 3")
                 debug_rejects['ratio'] += 1
 
-            # Print debug info for larger contours
-            if height > frame_height * 0.05:
-                print(f"\nContour {idx}:")
-                print(f"  Height: {height:.1f} px ({height / frame_height * 100:.1f}% of frame)")
-                print(f"  Width: {width:.1f} px ({width / frame_width * 100:.1f}% of frame)")
-                print(f"  Angle: {angle:.1f}°")
-                print(f"  Aspect Ratio: {height / width if width > 0 else 0:.1f}")
-                if not is_candidate:
-                    print(f"  Rejected due to: {', '.join(reason)}")
-                else:
-                    print("  ACCEPTED")
-
             if is_candidate:
                 candidates.append(contour)
-
-        print("\nDetection Summary:")
-        print(f"Total contours analyzed: {len(contours)}")
-        print(f"Candidates found: {len(candidates)}")
-        print("\nRejection reasons:")
-        for reason, count in debug_rejects.items():
-            print(f"  {reason}: {count}")
 
         return candidates
 
@@ -289,7 +270,7 @@ def main():
     detector = GoalpostDetector()
 
     # Open video file
-    video_path = 'media/football_clips/clip3.mp4'
+    video_path = 'media/football_clips/clip1.mp4'
     cap = cv2.VideoCapture(video_path)
 
     if not cap.isOpened():
