@@ -50,7 +50,7 @@ class Helper:
         self.last_valid_mask = None
 
     def detect_players(self, img, hsv):
-        """Detect players using multiple techniques including jersey colors and local variance"""
+        """Detect players using jersey colors and local variance"""
         h, s, v = cv2.split(hsv)
 
         # Jersey color detection
@@ -81,7 +81,7 @@ class Helper:
 
     def create_grass_mask(self, hsv, debug_folder=None):
         """
-        Create a robust grass mask that accounts for color variations and handles LED boards
+        Create a grass mask that accounts for color variations and handles LED boards
         """
         # Multiple grass color ranges
         grass_masks = []
@@ -167,7 +167,7 @@ class Helper:
         return field_mask
 
     def lineGrouper(self, lines):
-        """Improved line grouping using angle and perpendicular distance."""
+        """Line grouping using angle and perpendicular distance."""
         if not lines:
             return []
 
